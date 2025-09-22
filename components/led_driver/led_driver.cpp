@@ -1,62 +1,72 @@
-#include <color_format.h>
 #include <esp_log.h>
 #include <led_driver.h>
-#include "driver/ledc.h"
 #include <math.h>
 #include <helpers.hpp>
 #include <inttypes.h> 
 
 /* Generates the channel configs, then initialize them */
-esp_err_t LED_Driver::generateChannelConfig(uint8_t gpio, uint4_t channel) {
+esp_err_t LED_Driver::enable_LEDC_Channel(led_channel_info_t config) {
+    // Channel already enabled or missing gpio value then skip
+    if (channel_enabled[config.channel] || config.gpio == -1){
+        return ESP_OK;
+    }
+
     ledc_channel_config_t ledc_channel_cfg =
         {
-            .gpio_num   = gpio,
+            .gpio_num   = config.gpio,
             .speed_mode = LEDC_LOW_SPEED_MODE,
-            .channel    = channel,
+            .channel    = config.channel,
             .intr_type  = LEDC_INTR_FADE_END,
             .timer_sel  = timer,
             .duty       = 0,
             .hpoint     = 0,
-        }
+        };
 
-        channel_enabled[channel] = true;
-        return ledc_channel_config(&ledc_channel_cfg);
+    channel_enabled[config.channel] = true;
+    return ledc_channel_config(&ledc_channel_cfg);
+}
+esp_err_t LED_Driver::disable_LEDC_Channel(led_channel_info_t config) {
+    // Channel already disabled, skip
+    if (channel_enabled[config.channel] == false){
+        return ESP_OK;
+    }
+
+    channel_enabled[config.channel] = false;
+
+    // Stop PWM and hold the pin low
+    esp_err_t err = ledc_stop(LEDC_SPEED_MODE, config.channel, 0);
+    err |= gpio_set_level((gpio_num_t)config.gpio, 0); // Ensure pin is held low
+
+    return err;
 }
 
 /* Initialize the led driver and the shared instance struct */
-LED_Driver::LED_Driver(LED_GPIO_MAP gpio_pins) {
-    ESP_LOGI(TAG, "Initializing light driver");
+LED_Driver::LED_Driver(LED_GPIO_MAP pins_) {
+    ESP_LOGE(TAG, "Initializing light driver");
 
     max_pwm = pow(2, 13);
 
     // Apply configuration to timer
     ledc_timer_config(&ledc_timer);
 
+    
     /* Generate Configurations for the needed channels */
-    if (gpio_pins.red != -1){
-        generateChannelConfig(gpio_pins.red, CHANNEL_RED, LEDC_TIMER_0);
-    }
-    if (gpio_pins.green != -1){
-        generateChannelConfig(gpio_pins.green, CHANNEL_GREEN, LEDC_TIMER_0);
-    }
-    if (gpio_pins.blue != -1){
-        generateChannelConfig(gpio_pins.blue, CHANNEL_BLUE, LEDC_TIMER_0);
-    }
-    if (gpio_pins.white != -1){
-        generateChannelConfig(gpio_pins.white, CHANNEL_WHITE, LEDC_TIMER_0);
-    }
-    if (gpio_pins.warmwhite != -1){
-        generateChannelConfig(gpio_pins.warmwhite, CHANNEL_WARMWHITE, LEDC_TIMER_0);
-    }
+    enable_LEDC_Channel(pins_.red);
+    enable_LEDC_Channel(pins_.green);
+    enable_LEDC_Channel(pins_.blue);
+    enable_LEDC_Channel(pins_.white);
+    enable_LEDC_Channel(pins_.warmwhite);
 
-    // Currently Unneeded but allows for the fade func
+    pins = pins_;
+
     ledc_fade_func_install(0);
 }
 /* -------------------------------------------------------- */
 
+
 /* Sets the duty cycle to zero, effectively turning off the LEDs */
-LED_Driver::set_power(bool new_power){
-    ESP_LOGI(TAG, "Setting power to: %d", power);
+esp_err_t LED_Driver::set_power(bool new_power){
+    ESP_LOGE(TAG, "Setting power to: %d", power);
     power = new_power;
 
     return set_brightness(power);
@@ -64,35 +74,49 @@ LED_Driver::set_power(bool new_power){
 /* -------------------------------------------------------- */
 
 /* Converts the internal duty cycle format to the needed PWM value */
-LED_Driver::duty_to_pwm(float color) {
-    color *= (brightness/100.f);
-    uint32_t value = static_cast<uint32_t>(max_pwm*color);
+uint32_t LED_Driver::duty_to_pwm(float color) {
+    // Use integer math for efficiency on embedded systems
+    uint32_t value = (uint32_t)((color * bri * max_pwm) / 100.0f);
+
+    ESP_LOGE(TAG, "Color: %f, Brightness: %d, PWM: %" PRIu32, color, bri, value);
     return value;
 }
 /* ---------------------------------------------------------------- */
 
-esp_err_t LED_Driver::set_channel_duty(float *new_color, float *old_color, ledc_channel_t channel){
+esp_err_t LED_Driver::set_channel_duty(float *new_color, float *old_color, led_channel_info_t channelConfig){
     // If the channel isn't enabled, or if the color/brightness hasn't changed skip
-    if(!channel_enabled[channel] || ((new_color == old_color) && (nbri == bri))){
+    if(new_color == old_color){
         // Nothing changed on this channel skip
         return ESP_OK;
     }
-    // Duty changed so apply new value
-    &old_color = &new_color;
-    return ledc_set_duty_and_update(LEDC_SPEED_MODE, channel, duty_to_pwm(&new_color), 0);
+
+    // Update Tracker Used To Speed Up Future Checks
+    old_color = new_color;
+
+    // Disable channel if we are trying to set it to 0
+    if (new_color == 0 && channel_enabled[channelConfig.channel] == true){
+        disable_LEDC_Channel(channelConfig);
+        return ESP_OK;
+    } 
+
+    // Enable channel if it was off and we are trying to set a value
+    if (new_color != 0 && channel_enabled[channelConfig.channel] == false){
+        enable_LEDC_Channel(channelConfig);
+    }
+    
+    return ledc_set_duty_and_update(LEDC_SPEED_MODE, channelConfig.channel, duty_to_pwm(*new_color), 0);
 }
 
 /* Sets the duty cycle for each LEDC Channel */
-LED_Driver::set_duty(){
-    ESP_LOGI(TAG, "Setting RGB to: %f, %f, %f", nRGB.red, nRGB.green, nRGB.blue);
+esp_err_t LED_Driver::set_duty(){
+    ESP_LOGE(TAG, "Setting RGB to: %f, %f, %f, %f, %f", nRGB.red, nRGB.green, nRGB.blue, nRGB.white, nRGB.warmwhite);
     esp_err_t err = ESP_OK;
 
-    err |= set_channel_duty(nRGB.red, RGB.red, CHANNEL_RED);
-    err |= set_channel_duty(nRGB.green, RGB.green, CHANNEL_GREEN);
-    err |= set_channel_duty(nRGB.blue, RGB.blue, CHANNEL_BLUE);
-    err |= set_channel_duty(nRGB.white, RGB.white, CHANNEL_WHITE);
-    err |= set_channel_duty(nRGB.warmwhite, RGB.warmwhite, CHANNEL_WARMWHITE);
-    bri = nbri;
+    err |= set_channel_duty(&nRGB.red, &RGB.red, pins.red);
+    err |= set_channel_duty(&nRGB.green, &RGB.green, pins.green);
+    err |= set_channel_duty(&nRGB.blue, &RGB.blue, pins.blue);
+    err |= set_channel_duty(&nRGB.white, &RGB.white, pins.white);
+    err |= set_channel_duty(&nRGB.warmwhite, &RGB.warmwhite, pins.warmwhite);
     
     return err;
 }
@@ -101,8 +125,8 @@ LED_Driver::set_duty(){
 
 
 /* Sets the brightness for each channel */
-LED_Driver::set_brightness(uint8_t brightness){
-    ESP_LOGI(TAG, "Setting brightness to: %d", brightness);
+esp_err_t LED_Driver::set_brightness(uint8_t brightness){
+    ESP_LOGE(TAG, "Setting brightness to: %d", brightness);
 
     if (!power) {
         bri = 0;
@@ -115,8 +139,8 @@ LED_Driver::set_brightness(uint8_t brightness){
 /* ---------------------------------------- */
 
 /* Determines the needed channel duty cycles for a given temperature  */
-LED_Driver::set_temperature(uint32_t temperature){
-    ESP_LOGI(TAG, "Setting temperature to: %lu", temperature);
+esp_err_t LED_Driver::set_temperature(uint32_t temperature){
+    ESP_LOGE(TAG, "Setting temperature to: %lu", temperature);
 
     float white = clamp<float>(temperature/10000.0, 0, 1);
 
@@ -127,15 +151,14 @@ LED_Driver::set_temperature(uint32_t temperature){
     nRGB.green = 0;
     nRGB.blue  = 0;
 
-
-    return set_duty;
+    return set_duty();
 }
 /* -----------------------------------------------------------------  */
 
 /* Determines the needed channel duty cycles for a given ColorXY value */
-LED_Driver::set_colorXY(long x, long y){
-    ESP_LOGI(TAG, "Setting ColorXY to: (%lu, %lu)", x, y);
-    
+esp_err_t LED_Driver::set_colorXY(long x, long y){
+    ESP_LOGE(TAG, "Setting ColorXY to: (%lu, %lu)", x, y);
+
     if(x != -1){
         XY.x = x;
     }
@@ -147,7 +170,7 @@ LED_Driver::set_colorXY(long x, long y){
         nRGB.white = 0;
         nRGB.warmwhite = 0;
 
-        xy_to_duty(XY.x, XY.y, &nRGB);
+        xy_to_duty(XY.x, XY.y, bri, &nRGB);
         XY = {-1, -1};
         return set_duty();
     }

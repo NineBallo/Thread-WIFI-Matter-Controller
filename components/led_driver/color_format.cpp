@@ -5,36 +5,61 @@
 #include <helpers.hpp>
 
 /* Convert ColorXY to a 3 point float value representing the relative duty cycle for that color. */
-void xy_to_duty(uint16_t cx, uint16_t cy, RGB_color_t *RGB)
+// xy to RGB with brightness scaling
+void xy_to_duty(uint16_t cx, uint16_t cy, float brightness, RGB_color_t *RGB)
 {
-    float x = cx / MATTER_COLOR_MAX;
-    float y = cy / MATTER_COLOR_MAX;
+    // 1. Normalize input coordinates from Matter's uint16_t to float [0, 1]
+    // The spec uses 0-65535, so we divide by 65535.0
+    float x = static_cast<float>(cx) / 65535.0f;
+    float y = static_cast<float>(cy) / 65535.0f;
 
-    float X = x * (80. / y);
-    float Y = 80.;
-    float Z = (1 - x - y) * (80. / y);
-
-    float r = X * 3.2404542 + Y * -1.5371385 + Z * -0.4985314;
-    float g = X * -0.9692660 + Y * 1.8760108 + Z * 0.0415560;
-    float b = X * 0.0556434 + Y * -0.2040259 + Z * 1.0572252;
-
-    float min = std::min(std::min(r, g), b);
-    if (min < 0)
-    {
-        r -= min;
-        g -= min;
-        b -= min;
+    // A basic check for invalid coordinates
+    if (y <= 0.0f || (x + y) > 1.0f) {
+        RGB->red = 0.0f;
+        RGB->green = 0.0f;
+        RGB->blue = 0.0f;
+        return;
     }
 
-    r = ((r > 0.0031308) ? (1.055 * pow(r, 1 / 2.4) - 0.055) : (12.92 * r));
-    g = ((g > 0.0031308) ? (1.055 * pow(g, 1 / 2.4) - 0.055) : (12.92 * g));
-    b = ((b > 0.0031308) ? (1.055 * pow(b, 1 / 2.4) - 0.055) : (12.92 * b));
+    // 2. Use the brightness parameter for Luminance (Y)
+    // The brightness parameter should be in the range [0.0, 1.0]
+    float Y = brightness;
 
-    float max = std::max(std::max(r, g), b);
+    // 3. Convert from xyY to XYZ color space
+    float X = (x * Y) / y;
+    float Z = ((1.0f - x - y) * Y) / y;
 
-    RGB->red   =  clamp<float>(r/max, 0, 1);
-    RGB->green =  clamp<float>(g/max, 0, 1);
-    RGB->blue  =  clamp<float>(b/max, 0, 1);
+    // 4. Convert from XYZ to linear sRGB
+    // This uses the standard D65 illuminant matrix for sRGB.
+    float r_linear = X * 3.2404542f + Y * -1.5371385f + Z * -0.4985314f;
+    float g_linear = X * -0.9692660f + Y * 1.8760108f + Z * 0.0415560f;
+    float b_linear = X * 0.0556434f + Y * -0.2040259f + Z * 1.0572252f;
+
+    // 5. Clip linear values to handle out-of-gamut colors properly.
+    // First, simply clip any negative values to 0. This is better than adding white.
+    r_linear = std::max(0.0f, r_linear);
+    g_linear = std::max(0.0f, g_linear);
+    b_linear = std::max(0.0f, b_linear);
+
+    // Second, if any component is > 1.0, the color is too bright to be displayed.
+    // Scale all components down to fit within the gamut while preserving the hue.
+    float max_comp = std::max({r_linear, g_linear, b_linear});
+    if (max_comp > 1.0f) {
+        r_linear /= max_comp;
+        g_linear /= max_comp;
+        b_linear /= max_comp;
+    }
+
+    // 6. Apply gamma correction to get non-linear sRGB values for display
+    auto gamma_correct = [](float c) {
+        return (c > 0.0031308f) ? (1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f)
+                                 : (12.92f * c);
+    };
+
+    // 7. Store the final, clamped values
+    RGB->red   = std::clamp(gamma_correct(r_linear), 0.0f, 1.0f);
+    RGB->green = std::clamp(gamma_correct(g_linear), 0.0f, 1.0f);
+    RGB->blue  = std::clamp(gamma_correct(b_linear), 0.0f, 1.0f);
 }
 /* --------------------------------------------------------------------------------------------- */
 

@@ -1,12 +1,23 @@
-#pragma once
+#ifndef LEDDRIVER_H
+#define LEDDRIVER_H
+
 #include <esp_err.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <driver/ledc.h>
+#include "./color_format.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+typedef struct {
+    int gpio;
+    int channel;
+    bool output_invert;
+} led_driver_config_t;
+
+typedef void *led_driver_handle_t;
 
 /* Channel mappings from RGBWW to the respective channels */
 #define CHANNEL_RED        LEDC_CHANNEL_0
@@ -24,15 +35,21 @@ extern "C" {
 /* ------------------------------------------ */
 
 typedef struct {
-    uint8_t red       = -1;
-    uint8_t green     = -1;
-    uint8_t blue      = -1;
-    uint8_t white     = -1;
-    uint8_t warmwhite = -1;
+    int gpio;
+    ledc_channel_t channel;
+} led_channel_info_t;
+
+typedef struct {
+    led_channel_info_t red       = {-1, CHANNEL_RED};
+    led_channel_info_t green     = {-1, CHANNEL_GREEN};
+    led_channel_info_t blue      = {-1, CHANNEL_BLUE};
+    led_channel_info_t white     = {-1, CHANNEL_WHITE};
+    led_channel_info_t warmwhite = {-1, CHANNEL_WARMWHITE};
 } LED_GPIO_MAP;
 
 class LED_Driver {
-    LED_Driver(LED_GPIO_MAP gpio_pins);
+    public:
+    LED_Driver(LED_GPIO_MAP gpioChannelConfig);
     ~LED_Driver();
 
     public:
@@ -45,20 +62,22 @@ class LED_Driver {
 
     private:
     /* Internal LED Driver Functions */
+        esp_err_t disable_LEDC_Channel(led_channel_info_t config);
+        esp_err_t enable_LEDC_Channel(led_channel_info_t config);
+        
         esp_err_t set_duty();
-        esp_err_t set_channel_duty(float *new_Color, float *old_Color, ledc_channel_t channel);
-        esp_err_t generateChannelConfig(uint8_t gpio, uint4_t channel);
+        esp_err_t set_channel_duty(float *new_Color, float *old_Color, led_channel_info_t channel);
         uint32_t  duty_to_pwm(float color);
     /* ---------------------------- */
-
+    
     private:
         ledc_timer_t timer = LEDC_TIMER_0;
         const char *TAG = "led_driver";
         
     private:
-        uint4_t  nChannels = {};
+        uint8_t  nChannels = {};
         uint32_t max_pwm   = {};
-
+        LED_GPIO_MAP pins = {};
 
     private:
         bool power   = {}; // If any of the lights are on
@@ -74,7 +93,7 @@ class LED_Driver {
 };
 
 /* LEDC Timer Configuration */
-ledc_timer_config_t ledc_timer = {
+static const ledc_timer_config_t ledc_timer = {
     .speed_mode = LEDC_SPEED_MODE,           // timer mode
     .duty_resolution = LEDC_TIMER_13_BIT,    // resolution of PWM duty
     .timer_num = LEDC_TIMER,                 // timer index
@@ -87,3 +106,5 @@ ledc_timer_config_t ledc_timer = {
 #ifdef __cplusplus
 }
 #endif
+
+#endif // LEDDRIVER_H

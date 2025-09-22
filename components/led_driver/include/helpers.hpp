@@ -1,4 +1,6 @@
-#pragma once
+#ifndef HELPERS_H
+#define HELPERS_H
+
 #include <algorithm>
 
 
@@ -13,3 +15,5 @@ void set_all_values_in_array(T (&arr)[LEN], T val) {
         value = val;
     }
 }
+
+#endif // HELPERS_H

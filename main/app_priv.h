@@ -1,4 +1,5 @@
-#pragma once
+#ifndef APPPRIV_H
+#define APPPRIV_H
 
 #include <esp_err.h>
 #include <esp_matter.h>
@@ -28,10 +29,10 @@
 
 /* Pin mappings from RGBWW to the respective GPIO values */
 #define PIN_R  (22)
-#define PIN_G  (21)
-#define PIN_B  (1)
-#define PIN_W  (3)
-#define PIN_WW (2)
+#define PIN_G  (3)
+#define PIN_B  (21)
+#define PIN_W  (1)
+#define PIN_WW (0)
 /* ----------------------------------------------------- */
 
 typedef void *app_driver_handle_t;
@@ -89,3 +90,5 @@ esp_err_t app_driver_light_set_defaults(uint16_t endpoint_id);
         .storage_partition_name = "nvs", .netif_queue_size = 10, .task_queue_size = 10, \
     }
 #endif
+
+#endif // APPPRIV_H

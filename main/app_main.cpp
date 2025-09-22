@@ -134,32 +134,48 @@ extern "C" void app_main()
     /* Initialize the ESP NVS layer */
     nvs_flash_init();
 
+    //MEMORY_PROFILER_DUMP_HEAP_STAT("Bootup");
+
     /* Initialize driver */
     app_driver_handle_t light_handle = app_driver_light_init();
+   // app_driver_handle_t button_handle = app_driver_button_init();
+    //app_reset_button_register(button_handle);
 
     /* Create a Matter node and add the mandatory Root Node device type on endpoint 0 */
     node::config_t node_config;
 
     // node handle can be used to add/modify other endpoints.
     node_t *node = node::create(&node_config, app_attribute_update_cb, app_identification_cb);
-    //ABORT_APP_ON_FAILURE(node != nullptr, ESP_LOGE(TAG, "Failed to create Matter node"));
 
+    // CONFIG #1 ---------------------------------------------------------------------------------------------------------------------------
     extended_color_light::config_t light_config;
     light_config.on_off.on_off = DEFAULT_POWER;
     light_config.on_off.lighting.start_up_on_off = nullptr;
+
     light_config.level_control.current_level = DEFAULT_BRIGHTNESS;
     light_config.level_control.on_level = DEFAULT_BRIGHTNESS;
     light_config.level_control.lighting.start_up_current_level = DEFAULT_BRIGHTNESS;
-    light_config.color_control.color_mode = (uint8_t)ColorControl::ColorMode::kColorTemperature;
-    light_config.color_control.enhanced_color_mode = (uint8_t)ColorControl::ColorMode::kColorTemperature;
+
+    light_config.color_control.color_mode = static_cast<uint8_t>(ColorControl::ColorMode::kCurrentXAndCurrentY);
+    light_config.color_control.enhanced_color_mode = static_cast<uint8_t>(ColorControl::ColorMode::kCurrentXAndCurrentY);
+
     light_config.color_control.color_temperature.startup_color_temperature_mireds = nullptr;
+    light_config.color_control.color_temperature.color_temp_physical_max_mireds = 370;
+    light_config.color_control.color_temperature.color_temp_physical_min_mireds = 153;
+
+    // 1. Set all capabilities for maximum compatibility
+    light_config.color_control.color_capabilities =
+        (1 << static_cast<uint16_t>(ColorControl::Feature::kHueAndSaturation)) |
+        (1 << static_cast<uint16_t>(ColorControl::Feature::kXy) |
+        (1 << static_cast<uint16_t>(ColorControl::Feature::kEnhancedHue)) |
+        (1 << static_cast<uint16_t>(ColorControl::Feature::kColorLoop)));
 
     // endpoint handles can be used to add/modify clusters.
     endpoint_t *endpoint = extended_color_light::create(node, &light_config, ENDPOINT_FLAG_NONE, light_handle);
     //ABORT_APP_ON_FAILURE(endpoint != nullptr, ESP_LOGE(TAG, "Failed to create extended color light endpoint"));
 
     light_endpoint_id = endpoint::get_id(endpoint);
-    ESP_LOGI(TAG, "Light created with endpoint_id %d", light_endpoint_id);
+    ESP_LOGW(TAG, "xyLight created with endpoint_id %d", light_endpoint_id);
 
     /* Mark deferred persistence for some attributes that might be changed rapidly */
     attribute_t *current_level_attribute = attribute::get(light_endpoint_id, LevelControl::Id, LevelControl::Attributes::CurrentLevel::Id);
@@ -169,16 +185,16 @@ extern "C" void app_main()
     attribute::set_deferred_persistence(current_x_attribute);
     attribute_t *current_y_attribute = attribute::get(light_endpoint_id, ColorControl::Id, ColorControl::Attributes::CurrentY::Id);
     attribute::set_deferred_persistence(current_y_attribute);
+
     attribute_t *color_temp_attribute = attribute::get(light_endpoint_id, ColorControl::Id, ColorControl::Attributes::ColorTemperatureMireds::Id);
     attribute::set_deferred_persistence(color_temp_attribute);
 
+ 
 #if CHIP_DEVICE_CONFIG_ENABLE_THREAD && CHIP_DEVICE_CONFIG_ENABLE_WIFI_STATION
     // Enable secondary network interface
     secondary_network_interface::config_t secondary_network_interface_config;
     endpoint = endpoint::secondary_network_interface::create(node, &secondary_network_interface_config, ENDPOINT_FLAG_NONE, nullptr);
-   // ABORT_APP_ON_FAILURE(endpoint != nullptr, ESP_LOGE(TAG, "Failed to create secondary network interface endpoint"));
 #endif
-
 
 #if CHIP_DEVICE_CONFIG_ENABLE_THREAD
     /* Set OpenThread platform config */
@@ -192,7 +208,6 @@ extern "C" void app_main()
 
     /* Matter start */
     err = esp_matter::start(app_event_cb);
-    //ABORT_APP_ON_FAILURE(err == ESP_OK, ESP_LOGE(TAG, "Failed to start Matter, err:%d", err));
 
     /* Starting driver with default values */
     app_driver_light_set_defaults(light_endpoint_id);

@@ -42,7 +42,7 @@ esp_err_t LED_Driver::disable_LEDC_Channel(led_channel_info_t config) {
 
 /* Initialize the led driver and the shared instance struct */
 LED_Driver::LED_Driver(LED_GPIO_MAP pins_) {
-    ESP_LOGE(TAG, "Initializing light driver");
+    ESP_LOGW(TAG, "Initializing light driver");
 
     max_pwm = pow(2, 13);
 
@@ -66,10 +66,18 @@ LED_Driver::LED_Driver(LED_GPIO_MAP pins_) {
 
 /* Sets the duty cycle to zero, effectively turning off the LEDs */
 esp_err_t LED_Driver::set_power(bool new_power){
-    ESP_LOGE(TAG, "Setting power to: %d", power);
+    ESP_LOGW(TAG, "Setting power to: %d", power);
     power = new_power;
 
-    return set_brightness(power);
+    if (power) {
+        bri = (obri == 0) ? DEFAULT_BRIGHTNESS : bri; // If brightness was 0 set to default
+    } 
+    else {
+        obri = bri; // Save the old brightness for when we turn back on
+        bri = 0;    // Set brightness to 0
+    }
+
+    return set_brightness(bri);
 }
 /* -------------------------------------------------------- */
 
@@ -78,7 +86,7 @@ uint32_t LED_Driver::duty_to_pwm(float color) {
     // Use integer math for efficiency on embedded systems
     uint32_t value = (uint32_t)((color * bri * max_pwm) / 100.0f);
 
-    ESP_LOGE(TAG, "Color: %f, Brightness: %d, PWM: %" PRIu32, color, bri, value);
+    ESP_LOGW(TAG, "Color: %f, Brightness: %d, PWM: %" PRIu32, color, bri, value);
     return value;
 }
 /* ---------------------------------------------------------------- */
@@ -109,7 +117,7 @@ esp_err_t LED_Driver::set_channel_duty(float *new_color, float *old_color, led_c
 
 /* Sets the duty cycle for each LEDC Channel */
 esp_err_t LED_Driver::set_duty(){
-    ESP_LOGE(TAG, "Setting RGB to: %f, %f, %f, %f, %f", nRGB.red, nRGB.green, nRGB.blue, nRGB.white, nRGB.warmwhite);
+    ESP_LOGW(TAG, "Setting RGB to: %f, %f, %f, %f, %f", nRGB.red, nRGB.green, nRGB.blue, nRGB.white, nRGB.warmwhite);
     esp_err_t err = ESP_OK;
 
     err |= set_channel_duty(&nRGB.red, &RGB.red, pins.red);
@@ -126,7 +134,7 @@ esp_err_t LED_Driver::set_duty(){
 
 /* Sets the brightness for each channel */
 esp_err_t LED_Driver::set_brightness(uint8_t brightness){
-    ESP_LOGE(TAG, "Setting brightness to: %d", brightness);
+    ESP_LOGW(TAG, "Setting brightness to: %d", brightness);
 
     if (!power) {
         bri = 0;
@@ -140,7 +148,7 @@ esp_err_t LED_Driver::set_brightness(uint8_t brightness){
 
 /* Determines the needed channel duty cycles for a given temperature  */
 esp_err_t LED_Driver::set_temperature(uint32_t temperature){
-    ESP_LOGE(TAG, "Setting temperature to: %lu", temperature);
+    ESP_LOGW(TAG, "Setting temperature to: %lu", temperature);
 
     float white = clamp<float>(temperature/10000.0, 0, 1);
 
@@ -157,7 +165,7 @@ esp_err_t LED_Driver::set_temperature(uint32_t temperature){
 
 /* Determines the needed channel duty cycles for a given ColorXY value */
 esp_err_t LED_Driver::set_colorXY(long x, long y){
-    ESP_LOGE(TAG, "Setting ColorXY to: (%lu, %lu)", x, y);
+    ESP_LOGW(TAG, "Setting ColorXY to: (%lu, %lu)", x, y);
 
     if(x != -1){
         XY.x = x;

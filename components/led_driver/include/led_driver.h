@@ -84,7 +84,7 @@ class LED_Driver {
         bool channel_enabled[ESP32C6_MAX_CHANNELS] = {}; // If the channel is enabled or not
 
         uint8_t bri  = {}; // Bri is the currently applied brightness
-        uint8_t nbri = {}; // nBri is the working value to be applied
+        uint8_t obri = {}; // oBri is the old brightness value for when power is resumed
 
         RGB_CCT_Duty_t RGB  = {};  // RGB is the currently applied value
         RGB_CCT_Duty_t nRGB = {};  // nRGB is the working values to be applied
